@@ -164,13 +164,16 @@ class Manager:
             self._maybe_reload()
             retry = bool(self._settings.get("retry_on_failure", True))
 
+        # Initial pick uses the scheduler (respects weights).
+        with self._lock:
+            name = self._pick(exclude=set())
+
         tried: Dict[str, str] = {}
-        while True:
+        while name is not None:
             with self._lock:
-                name = self._pick(exclude=set(tried))
-                state = self._states.get(name) if name else None
+                state = self._states.get(name)
             if state is None:
-                break  # no untried, available provider left
+                break
 
             logger.info("-> trying '%s' (%s)", state.name, state.instance.model)
             start = time.monotonic()
@@ -183,6 +186,10 @@ class Manager:
                                time.monotonic() - start, exc)
                 if not retry:
                     break
+                # Don't call scheduler on retry — walk remaining providers in order
+                # so failures don't corrupt the scheduler's weight distribution.
+                with self._lock:
+                    name = self._next_available(exclude=set(tried))
                 continue
             except Exception as exc:  # unexpected: treat as a normal failure
                 self._on_failure(state, ProviderError(str(exc), provider=state.name))
@@ -190,6 +197,8 @@ class Manager:
                 logger.exception("x '%s' raised unexpectedly", state.name)
                 if not retry:
                     break
+                with self._lock:
+                    name = self._next_available(exclude=set(tried))
                 continue
 
             latency = time.monotonic() - start
@@ -212,11 +221,13 @@ class Manager:
             self._maybe_reload()
             retry = bool(self._settings.get("retry_on_failure", True))
 
+        with self._lock:
+            name = self._pick(exclude=set())
+
         tried: Dict[str, str] = {}
-        while True:
+        while name is not None:
             with self._lock:
-                name = self._pick(exclude=set(tried))
-                state = self._states.get(name) if name else None
+                state = self._states.get(name)
             if state is None:
                 break
 
@@ -224,11 +235,8 @@ class Manager:
             start = time.monotonic()
             try:
                 yielded = False
-                model_name = state.instance.model
                 for chunk in state.instance.stream_generate(prompt, **kwargs):
                     yielded = True
-                    if chunk.get("model"):
-                        model_name = chunk["model"]
                     yield chunk
 
                 if not yielded:
@@ -243,6 +251,8 @@ class Manager:
                                time.monotonic() - start, exc)
                 if not retry:
                     break
+                with self._lock:
+                    name = self._next_available(exclude=set(tried))
                 continue
             except Exception as exc:
                 self._on_failure(state, ProviderError(str(exc), provider=state.name))
@@ -250,6 +260,8 @@ class Manager:
                 logger.exception("x '%s' raised unexpectedly", state.name)
                 if not retry:
                     break
+                with self._lock:
+                    name = self._next_available(exclude=set(tried))
                 continue
 
             latency = time.monotonic() - start
@@ -274,6 +286,17 @@ class Manager:
         if not candidates:
             return None
         return self._scheduler.select(candidates)
+
+    def _next_available(self, exclude: Set[str]) -> Optional[str]:
+        """Return the first available provider *not* in ``exclude``, in config
+        order.  Used for retries after a failure so the scheduler's internal
+        weight state is never corrupted by failed attempts."""
+        now = time.time()
+        for name in self._order:
+            state = self._states.get(name)
+            if state and name not in exclude and state.available(now):
+                return name
+        return None
 
     def _on_failure(self, state: _ProviderState, exc: ProviderError) -> None:
         with self._lock:
