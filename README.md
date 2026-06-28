@@ -213,4 +213,3 @@ free_llm_api/
 
 * Only free tiers are configured. For OpenRouter, keep the `:free` model suffix.
 * Model IDs drift on free tiers — if one 404s, swap it in `config.yaml` (no restart needed).
-```
