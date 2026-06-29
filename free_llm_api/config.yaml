@@ -86,7 +86,7 @@ providers:
     enabled: true
     requires_key: false             # works key-less; token used only if present
     api_key: "${LLM7_API_KEY}"      # export LLM7_API_KEY to raise limits
-    model: "${LLM7_MODEL:-qwen3-235b}"             # free tier (gpt-5.4-mini etc. are pay-per-token)
+    model: "${LLM7_MODEL:-default}"             # free tier (gpt-5.4-mini etc. are pay-per-token)
     weight: "${LLM7_WEIGHT:-4}"
     extra:
       base_url: "https://api.llm7.io/v1"
