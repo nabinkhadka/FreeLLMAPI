@@ -1,4 +1,4 @@
-# free-llm-api / FreeLLMAPI
+# free-llm-api 
 
 A lightweight, **OpenRouter-style router for FREE LLM APIs**. It rotates across
 multiple free providers, fails over the instant one errors out, respects rate
